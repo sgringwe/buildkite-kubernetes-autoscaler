@@ -26,21 +26,11 @@ func main() {
 	var scaleDownCounter time.Time
 
 	// TODO: Implement quit ability
-	ticker := time.NewTicker(5 * time.Second)
-	quit := make(chan struct{})
-	go func() {
-		for {
-		select {
-			case <- ticker.C:
-				performDesiredReplicaEvaluation(kubernetesClient, buildkiteClient, &scaleDownCounter)
-			case <- quit:
-				ticker.Stop()
-				return
-			}
-		}
-	}()
-
-	fmt.Println("Exiting buildkite autoscaler")
+	nextTime := time.Now().Truncate(time.Minute)
+	for {
+		nextTime = nextTime.Add(time.Minute)
+		performDesiredReplicaEvaluation(kubernetesClient, buildkiteClient, &scaleDownCounter)
+	}
 }
 
 func kubernetesClient() *kubernetes.Clientset {
