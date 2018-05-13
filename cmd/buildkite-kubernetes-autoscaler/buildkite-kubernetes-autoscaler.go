@@ -124,7 +124,7 @@ func performDesiredReplicaEvaluation(kubernetesClient *kubernetes.Clientset, bui
 		autoscalingStatus.Status = "cooling"
 		autoscalingStatus.ScaleDownStart = time.Now()
 		fmt.Printf("Beginning cool down period to scale down replicas...\n")
-	} else {
+	} else if (currentReplicas > minReplicas()) {
 		// We are already in cool down. Check if we have waited long enough, and if we have
 		// scale down some replicas.
 		coolDownLength := int(time.Now().Sub(autoscalingStatus.ScaleDownStart).Seconds())
