@@ -39,4 +39,4 @@
 
 [[constraint]]
   branch = "master"
-  name = "github.com/ashwanthkumar/slack-go-webhook"
+  name = "github.com/buildkite/go-buildkite"

@@ -3,9 +3,15 @@
 
 [[projects]]
   branch = "master"
-  name = "github.com/ashwanthkumar/slack-go-webhook"
+  name = "github.com/buildkite/go-buildkite"
+  packages = ["buildkite"]
+  revision = "96c446f66ad31123d5da38782f8d888a7666e898"
+
+[[projects]]
+  name = "github.com/cenkalti/backoff"
   packages = ["."]
-  revision = "294f07484c855dcbfb409e3e95c04ef7c5cae6ef"
+  revision = "2ea60e5f094469f9e65adb9cd103795b73ae743e"
+  version = "v2.0.0"
 
 [[projects]]
   name = "github.com/ghodss/yaml"
@@ -48,6 +54,12 @@
 
 [[projects]]
   branch = "master"
+  name = "github.com/google/go-querystring"
+  packages = ["query"]
+  revision = "53e6ce116135b80d037921a7fdd5138cf32d7a8a"
+
+[[projects]]
+  branch = "master"
   name = "github.com/google/gofuzz"
   packages = ["."]
   revision = "24818f796faf91cd76ec7bddd72458fbced7a6c1"
@@ -85,18 +97,6 @@
 
 [[projects]]
   branch = "master"
-  name = "github.com/moul/http2curl"
-  packages = ["."]
-  revision = "9ac6cf4d929b2fa8fd2d2e6dec5bb0feb4f4911d"
-
-[[projects]]
-  name = "github.com/parnurzeal/gorequest"
-  packages = ["."]
-  revision = "a578a48e8d6ca8b01a3b18314c43c6716bb5f5a3"
-  version = "v0.2.15"
-
-[[projects]]
-  branch = "master"
   name = "github.com/petar/GoLLRB"
   packages = ["llrb"]
   revision = "53be0d36a84c2a886ca057d34b6aa4468df9ccb4"
@@ -108,12 +108,6 @@
   version = "v2.0.1"
 
 [[projects]]
-  name = "github.com/pkg/errors"
-  packages = ["."]
-  revision = "645ef00459ed84a119197bfb8d8205042c6df63d"
-  version = "v0.8.0"
-
-[[projects]]
   name = "github.com/spf13/pflag"
   packages = ["."]
   revision = "e57e3eeb33f795204c1ca35f56c44f83227c6e66"
@@ -123,11 +117,11 @@
   branch = "master"
   name = "golang.org/x/net"
   packages = [
+    "context",
     "http2",
     "http2/hpack",
     "idna",
-    "lex/httplex",
-    "publicsuffix"
+    "lex/httplex"
   ]
   revision = "2fb46b16b8dda405028c50f7c7f0f9dd1fa6bfb1"
 
@@ -292,6 +286,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "cbaabaca6c31e80dc0d52072d0ea66344751f5d7ae73995707485e869955a05f"
+  inputs-digest = "44f3b6f6ce01958f02602737c1c944a58f8d77b35d4599358d8454b4735afa61"
   solver-name = "gps-cdcl"
   solver-version = 1
