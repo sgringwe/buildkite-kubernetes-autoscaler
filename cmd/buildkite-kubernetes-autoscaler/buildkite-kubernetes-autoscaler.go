@@ -77,13 +77,14 @@ func buildkiteInformation(buildkiteClient *buildkite.Client) (int, int) {
 	scheduledBuilds := 0
 	for _, build := range builds {
 		for _, job := range build.Jobs {
+			if job.State == nil {
+				continue
+			}
+
 			if *job.State == "running" {
 				runningBuilds += 1
 			} else if *job.State == "scheduled" {
 				scheduledBuilds += 1
-			} else {
-				fmt.Fprintln(os.Stderr, "Unexpected Job State value")
-				os.Exit(1)
 			}
 		}
 	}
@@ -91,8 +92,6 @@ func buildkiteInformation(buildkiteClient *buildkite.Client) (int, int) {
 	return runningBuilds, scheduledBuilds
 }
 
-// TODO: Split up nicely
-// TODO: Configurable scale up / down values
 func performDesiredReplicaEvaluation(kubernetesClient *kubernetes.Clientset, buildkiteClient *buildkite.Client, autoscalingStatus *AutoscalingStatus) {
 	runningBuilds, scheduledBuilds := buildkiteInformation(buildkiteClient)
 	
@@ -104,22 +103,28 @@ func performDesiredReplicaEvaluation(kubernetesClient *kubernetes.Clientset, bui
 	
 	fmt.Printf("Current status: Autoscaler: %s, %d running, %d scheduled, %d current replicas\n", autoscalingStatus.Status, runningBuilds, scheduledBuilds, currentReplicas)
 
-	// Make adjustments
-	// If anything is running or scheduled, ensure we have enough
-	// If nothing is running, slowly scale down over time
+	// Begin th main logic for determine the right replica count.
 	var neededReplicas = int(scheduledBuilds + runningBuilds)
 	var targetReplicas = int(currentReplicas)
 	if (runningBuilds > 0 || scheduledBuilds > 0) {
-		if (neededReplicas > currentReplicas) {
+		// Builds are currently running or are queued and need agents. If there is room to add
+		// more replicas, target what we need. Otherwise we are at the right number of replicas, the
+		// maximum.
+		if (currentReplicas < maxReplicas() && neededReplicas > currentReplicas) {
 			autoscalingStatus.Status = "correct"
 			targetReplicas = neededReplicas
-			fmt.Printf("Scaling up to %d replicas if allowed.\n", targetReplicas)
+			fmt.Printf("Scaling up to %d replicas or maximum.\n", targetReplicas)
+		} else {
+			autoscalingStatus.Status = "correct"
 		}
 	} else if (autoscalingStatus.Status != "cooling") {
+		// We have 0 running or scheduled builds. Let's start cool down period to begin scaling down.
 		autoscalingStatus.Status = "cooling"
 		autoscalingStatus.ScaleDownStart = time.Now()
 		fmt.Printf("Beginning cool down period to scale down replicas...\n")
 	} else {
+		// We are already in cool down. Check if we have waited long enough, and if we have
+		// scale down some replicas.
 		coolDownLength := int(time.Now().Sub(autoscalingStatus.ScaleDownStart).Seconds())
 		fmt.Printf("Now %d seconds out of %d into cool down period\n", coolDownLength, scaleDownFrequency())
 
@@ -130,12 +135,10 @@ func performDesiredReplicaEvaluation(kubernetesClient *kubernetes.Clientset, bui
 		}
 	}
 
-	minReplicas := 1
-	maxReplicas := 50
-	if targetReplicas > maxReplicas {
-		targetReplicas = maxReplicas
-	} else if targetReplicas < minReplicas {
-		targetReplicas = minReplicas
+	if targetReplicas > maxReplicas() {
+		targetReplicas = maxReplicas()
+	} else if targetReplicas < minReplicas() {
+		targetReplicas = minReplicas()
 	}
 
 	if targetReplicas != currentReplicas {
