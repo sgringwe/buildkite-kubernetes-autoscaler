@@ -82,12 +82,14 @@ func performDesiredReplicaEvaluation(kubernetesClient *kubernetes.Clientset, bui
 			os.Exit(1)
 		}
 	}
-
+	
 	// Get current replica count
 	targetDeploymentName := os.Getenv("TARGET_DEPLOYMENT_NAME")
 	deployment, err := kubernetesClient.AppsV1().Deployments("buildkite").Get(targetDeploymentName, metav1.GetOptions{})
 	check(err)
 	currentReplicas := int(deployment.Status.Replicas)
+	
+	fmt.Printf("Current status: %d running, %d scheduled, %d current replicas", runningBuilds, scheduledBuilds, currentReplicas)
 
 	// Make adjustments
 	// If anything is running or scheduled, ensure we have enough
@@ -97,18 +99,21 @@ func performDesiredReplicaEvaluation(kubernetesClient *kubernetes.Clientset, bui
 	if (runningBuilds > 0 || scheduledBuilds > 0) {
 		if (neededReplicas > currentReplicas) {
 			targetReplicas = neededReplicas
-			fmt.Printf("Scaling up to the needed replica count...")
+			fmt.Printf("Scaling up to the needed replica count...\n")
 		}
+	} else if (scaleDownCounter == nil) {
+		*scaleDownCounter = time.Now()
+		fmt.Printf("Beginning cool down period to scale down replicas...\n")
 	} else {
-		if (scaleDownCounter == nil) {
-			*scaleDownCounter = time.Now()
-			fmt.Printf("Beginning cool down period to scale down replicas...")
-		} else if (time.Now().Sub(*scaleDownCounter).Seconds() > 300) { // 300 is scale down rate
+		coolDownLength := int(time.Now().Sub(*scaleDownCounter).Seconds())
+		fmt.Printf("Now %d seconds out of %d into cool down period\n", coolDownLength, 300)
+
+		if (coolDownLength > 300) { // 300 is scale down rate
 			targetReplicas = currentReplicas - 20 // 20 is scale down size
 			scaleDownCounter = nil
-			fmt.Printf("Scaling down replicas due to no jobs scheduled or running for cool down period...")
+			fmt.Printf("Scaling down replicas due to no jobs scheduled or running for cool down period...\n")
 		} else {
-			fmt.Printf("Waiting cool down period to scale down replicas...")
+			fmt.Printf("Waiting cool down period to scale down replicas...\n")
 		}
 	}
 
@@ -122,7 +127,9 @@ func performDesiredReplicaEvaluation(kubernetesClient *kubernetes.Clientset, bui
 
 	deployment.Spec.Replicas = int32Ptr(int32(targetReplicas))
 	_, updateErr := kubernetesClient.AppsV1().Deployments("buildkite").Update(deployment)
-	check(updateErr)
+	if (updateErr != nil) {
+		fmt.Fprintln(os.Stderr, updateErr)
+	}
 }
 
 func int32Ptr(i int32) *int32 { return &i }
