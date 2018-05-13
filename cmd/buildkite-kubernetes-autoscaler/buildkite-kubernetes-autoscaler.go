@@ -1,10 +1,10 @@
 package main
 
 import (
-	"crypto/x509"
 	"fmt"
 	"os"
 	"time"
+	"strconv"
 
 	"github.com/buildkite/go-buildkite/buildkite"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -14,22 +14,26 @@ import (
 
 const DEFAULT_MINIMUM_DAYS = 45
 
-type HostResult struct {
-	Host  string
-	Certs []x509.Certificate
+type AutoscalingStatus struct {
+	ScaleDownStart time.Time
+	Status string // unknown, cooling, correct
 }
 
 func main() {
 	fmt.Println("Starting buildkite autoscaling")
 	kubernetesClient := kubernetesClient()
 	buildkiteClient := buildkiteClient()
-	var scaleDownCounter time.Time
+	var autoscalingStatus AutoscalingStatus
+	autoscalingStatus.Status = "unknown"
+
+	evaluateTicker := time.NewTicker(10 * time.Second)
 
 	// TODO: Implement quit ability
-	nextTime := time.Now().Truncate(time.Minute)
 	for {
-		nextTime = nextTime.Add(time.Minute)
-		performDesiredReplicaEvaluation(kubernetesClient, buildkiteClient, &scaleDownCounter)
+		select {
+		case <-evaluateTicker.C:
+			performDesiredReplicaEvaluation(kubernetesClient, buildkiteClient, &autoscalingStatus)
+		}
 	}
 }
 
@@ -60,28 +64,37 @@ func check(err error) {
 	}
 }
 
-// TODO: Split up nicely
-// TODO: Configurable scale up / down values
-func performDesiredReplicaEvaluation(kubernetesClient *kubernetes.Clientset, buildkiteClient *buildkite.Client, scaleDownCounter *time.Time) {
+func buildkiteInformation(buildkiteClient *buildkite.Client) (int, int) {
 	// Get build counts from Buildkite
 	buildListOptions := &buildkite.BuildsListOptions{
 		State: []string{ "running", "scheduled" },
 	}
+	
 	builds, _, err := buildkiteClient.Builds.List(buildListOptions)
 	check(err)	
 
 	runningBuilds := 0
 	scheduledBuilds := 0
 	for _, build := range builds {
-		if *build.State == "running" {
-			runningBuilds += 1
-		} else if *build.State == "scheduled" {
-			scheduledBuilds += 1
-		} else {
-			fmt.Fprintln(os.Stderr, "Unexpected build State value")
-			os.Exit(1)
+		for _, job := range build.Jobs {
+			if *job.State == "running" {
+				runningBuilds += 1
+			} else if *job.State == "scheduled" {
+				scheduledBuilds += 1
+			} else {
+				fmt.Fprintln(os.Stderr, "Unexpected Job State value")
+				os.Exit(1)
+			}
 		}
 	}
+
+	return runningBuilds, scheduledBuilds
+}
+
+// TODO: Split up nicely
+// TODO: Configurable scale up / down values
+func performDesiredReplicaEvaluation(kubernetesClient *kubernetes.Clientset, buildkiteClient *buildkite.Client, autoscalingStatus *AutoscalingStatus) {
+	runningBuilds, scheduledBuilds := buildkiteInformation(buildkiteClient)
 	
 	// Get current replica count
 	targetDeploymentName := os.Getenv("TARGET_DEPLOYMENT_NAME")
@@ -89,7 +102,7 @@ func performDesiredReplicaEvaluation(kubernetesClient *kubernetes.Clientset, bui
 	check(err)
 	currentReplicas := int(deployment.Status.Replicas)
 	
-	fmt.Printf("Current status: %d running, %d scheduled, %d current replicas", runningBuilds, scheduledBuilds, currentReplicas)
+	fmt.Printf("Current status: Autoscaler: %s, %d running, %d scheduled, %d current replicas\n", autoscalingStatus.Status, runningBuilds, scheduledBuilds, currentReplicas)
 
 	// Make adjustments
 	// If anything is running or scheduled, ensure we have enough
@@ -98,22 +111,22 @@ func performDesiredReplicaEvaluation(kubernetesClient *kubernetes.Clientset, bui
 	var targetReplicas = int(currentReplicas)
 	if (runningBuilds > 0 || scheduledBuilds > 0) {
 		if (neededReplicas > currentReplicas) {
+			autoscalingStatus.Status = "correct"
 			targetReplicas = neededReplicas
-			fmt.Printf("Scaling up to the needed replica count...\n")
+			fmt.Printf("Scaling up to %d replicas if allowed.\n", targetReplicas)
 		}
-	} else if (scaleDownCounter == nil) {
-		*scaleDownCounter = time.Now()
+	} else if (autoscalingStatus.Status != "cooling") {
+		autoscalingStatus.Status = "cooling"
+		autoscalingStatus.ScaleDownStart = time.Now()
 		fmt.Printf("Beginning cool down period to scale down replicas...\n")
 	} else {
-		coolDownLength := int(time.Now().Sub(*scaleDownCounter).Seconds())
-		fmt.Printf("Now %d seconds out of %d into cool down period\n", coolDownLength, 300)
+		coolDownLength := int(time.Now().Sub(autoscalingStatus.ScaleDownStart).Seconds())
+		fmt.Printf("Now %d seconds out of %d into cool down period\n", coolDownLength, scaleDownFrequency())
 
-		if (coolDownLength > 300) { // 300 is scale down rate
-			targetReplicas = currentReplicas - 20 // 20 is scale down size
-			scaleDownCounter = nil
+		if (coolDownLength > scaleDownFrequency()) {
+			targetReplicas = currentReplicas - scaleDownSize()
+			autoscalingStatus.ScaleDownStart = time.Now()
 			fmt.Printf("Scaling down replicas due to no jobs scheduled or running for cool down period...\n")
-		} else {
-			fmt.Printf("Waiting cool down period to scale down replicas...\n")
 		}
 	}
 
@@ -125,11 +138,41 @@ func performDesiredReplicaEvaluation(kubernetesClient *kubernetes.Clientset, bui
 		targetReplicas = minReplicas
 	}
 
-	deployment.Spec.Replicas = int32Ptr(int32(targetReplicas))
-	_, updateErr := kubernetesClient.AppsV1().Deployments("buildkite").Update(deployment)
-	if (updateErr != nil) {
-		fmt.Fprintln(os.Stderr, updateErr)
+	if targetReplicas != currentReplicas {
+		deployment.Spec.Replicas = int32Ptr(int32(targetReplicas))
+		_, updateErr := kubernetesClient.AppsV1().Deployments("buildkite").Update(deployment)
+		if (updateErr != nil) {
+			fmt.Fprintln(os.Stderr, updateErr)
+		}
 	}
+}
+
+func minReplicas() (int) {
+	rv, err := strconv.Atoi(os.Getenv("MINIMUM_REPLICAS"))
+	check(err)
+	return rv
+}
+
+func maxReplicas() (int) {
+	rv, err := strconv.Atoi(os.Getenv("MAXIMUM_REPLICAS"))
+	check(err)
+	return rv
+}
+
+func scaleDownSize() (int) {
+	rv, err := strconv.Atoi(os.Getenv("SCALE_DOWN_SIZE"))
+	if (err != nil) {
+		rv = 20 // default
+	}
+	return rv
+}
+
+func scaleDownFrequency() (int) {
+	rv, err := strconv.Atoi(os.Getenv("SCALE_DOWN_FREQUENCY"))
+	if (err != nil) {
+		rv = 300 // default
+	}
+	return rv
 }
 
 func int32Ptr(i int32) *int32 { return &i }
