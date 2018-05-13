@@ -26,7 +26,8 @@ func main() {
 	var autoscalingStatus AutoscalingStatus
 	autoscalingStatus.Status = "unknown"
 
-	evaluateTicker := time.NewTicker(10 * time.Second)
+	// Evaluate every 30 seconds
+	evaluateTicker := time.NewTicker(30 * time.Second)
 
 	// TODO: Implement quit ability
 	for {
@@ -97,11 +98,12 @@ func performDesiredReplicaEvaluation(kubernetesClient *kubernetes.Clientset, bui
 	
 	// Get current replica count
 	targetDeploymentName := os.Getenv("TARGET_DEPLOYMENT_NAME")
-	deployment, err := kubernetesClient.AppsV1().Deployments("buildkite").Get(targetDeploymentName, metav1.GetOptions{})
+	targetDeploymentNamespace := os.Getenv("TARGET_DEPLOYMENT_NAMESPACE")
+	deployment, err := kubernetesClient.AppsV1().Deployments(targetDeploymentNamespace).Get(targetDeploymentName, metav1.GetOptions{})
 	check(err)
 	currentReplicas := int(deployment.Status.Replicas)
 	
-	fmt.Printf("Current status: Autoscaler: %s, %d running, %d scheduled, %d current replicas\n", autoscalingStatus.Status, runningBuilds, scheduledBuilds, currentReplicas)
+	fmt.Printf("Current status: Autoscaler: %s; Builds: %d running, %d scheduled; Deployment: %d current replicas\n", autoscalingStatus.Status, runningBuilds, scheduledBuilds, currentReplicas)
 
 	// Begin th main logic for determine the right replica count.
 	var neededReplicas = int(scheduledBuilds + runningBuilds)
@@ -143,7 +145,7 @@ func performDesiredReplicaEvaluation(kubernetesClient *kubernetes.Clientset, bui
 
 	if targetReplicas != currentReplicas {
 		deployment.Spec.Replicas = int32Ptr(int32(targetReplicas))
-		_, updateErr := kubernetesClient.AppsV1().Deployments("buildkite").Update(deployment)
+		_, updateErr := kubernetesClient.AppsV1().Deployments(targetDeploymentNamespace).Update(deployment)
 		if (updateErr != nil) {
 			fmt.Fprintln(os.Stderr, updateErr)
 		}
