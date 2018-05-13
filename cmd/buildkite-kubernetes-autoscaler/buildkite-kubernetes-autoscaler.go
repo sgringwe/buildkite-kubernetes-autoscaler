@@ -85,7 +85,7 @@ func performDesiredReplicaEvaluation(kubernetesClient *kubernetes.Clientset, bui
 
 	// Get current replica count
 	targetDeploymentName := os.Getenv("TARGET_DEPLOYMENT_NAME")
-	deployment, err := kubernetesClient.AppsV1().Deployments(metav1.NamespaceAll).Get(targetDeploymentName, metav1.GetOptions{})
+	deployment, err := kubernetesClient.AppsV1().Deployments("buildkite").Get(targetDeploymentName, metav1.GetOptions{})
 	check(err)
 	currentReplicas := int(deployment.Status.Replicas)
 
@@ -121,7 +121,7 @@ func performDesiredReplicaEvaluation(kubernetesClient *kubernetes.Clientset, bui
 	}
 
 	deployment.Spec.Replicas = int32Ptr(int32(targetReplicas))
-	_, updateErr := kubernetesClient.AppsV1().Deployments(metav1.NamespaceAll).Update(deployment)
+	_, updateErr := kubernetesClient.AppsV1().Deployments("buildkite").Update(deployment)
 	check(updateErr)
 }
 
